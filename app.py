@@ -4,6 +4,12 @@ import csv
 import os
 from datetime import datetime
 
+from flask import send_file
+
+@app.route('/download', methods=['GET'])
+def download_csv():
+    return send_file('trash_data.csv', as_attachment=True)
+
 app = Flask(__name__)
 CSV_FILE = 'trash_data.csv'
 
