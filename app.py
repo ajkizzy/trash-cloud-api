@@ -1,111 +1,136 @@
-# Simple Flask API + Dashboard for Trash Can Data
-from flask import Flask, request, jsonify, send_file, render_template_string
+from flask import Flask, request, jsonify, send_file, render_template_string, abort
 import csv
 import os
 from datetime import datetime
+import zipfile
+import io
 
 app = Flask(__name__)
-CSV_FILE = 'trash_data.csv'
+LOG_DIR = "trash_logs"
+os.makedirs(LOG_DIR, exist_ok=True)
 
-def init_csv():
-    """Initialize CSV file with headers if it doesn't exist."""
-    if not os.path.exists(CSV_FILE):
-        with open(CSV_FILE, mode='w', newline='') as file:
-            writer = csv.writer(file)
-            writer.writerow(['timestamp', 'trash_can_id', 'fill_level'])
-
-init_csv()
 
 @app.route('/')
 def index():
-    return "Trash Can Data API is running. Visit /dashboard to view logs."
+    files = sorted(os.listdir(LOG_DIR))
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Trash Logs Dashboard</title>
+        <style>
+            body { font-family: Arial; background: #111; color: white; margin: 40px; }
+            h1 { color: #6cf; }
+            table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+            th, td { border: 1px solid #333; padding: 8px; text-align: left; }
+            tr:nth-child(even) { background: #222; }
+            a.button {
+                display: inline-block; padding: 6px 12px;
+                color: white; background: #6cf; border-radius: 4px;
+                text-decoration: none; font-weight: bold;
+            }
+            a.button:hover { background: #4af; }
+        </style>
+    </head>
+    <body>
+        <h1>Trash Bin Logs</h1>
+        <p>Below are all available log files stored on Render.</p>
+        <table>
+            <tr><th>Filename</th><th>Actions</th></tr>
+            {% for file in files %}
+                <tr>
+                    <td>{{ file }}</td>
+                    <td>
+                        <a class="button" href="/view/{{ file }}">View</a>
+                        <a class="button" href="/download/{{ file }}">Download</a>
+                    </td>
+                </tr>
+            {% endfor %}
+        </table>
+        <br>
+        <a class="button" href="/download_all">Download All Logs (ZIP)</a>
+    </body>
+    </html>
+    """
+    return render_template_string(html, files=files)
+
 
 @app.route('/add_data', methods=['POST'])
 def add_data():
-    """Add new trash can data to the CSV."""
     data = request.get_json(force=True, silent=True)
     if not data:
         return jsonify({'status': 'error', 'message': 'Invalid JSON'}), 400
 
     timestamp = data.get('timestamp', datetime.now().isoformat())
     trash_can_id = data.get('trash_can_id', 'unknown')
+    fill_level = data.get('fill_level', 0)
 
-    try:
-        fill_level = int(data.get('fill_level', 0))
-    except (ValueError, TypeError):
-        return jsonify({'status': 'error', 'message': 'fill_level must be an integer'}), 400
+    filename = f"trash_{datetime.now().date()}.csv"
+    path = os.path.join(LOG_DIR, filename)
 
-    with open(CSV_FILE, mode='a', newline='') as file:
-        writer = csv.writer(file)
+    write_header = not os.path.exists(path)
+    with open(path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(['timestamp', 'trash_can_id', 'fill_level'])
         writer.writerow([timestamp, trash_can_id, fill_level])
 
-    return jsonify({'status': 'success', 'timestamp': timestamp}), 200
+    return jsonify({'status': 'success', 'saved_to': filename}), 200
 
-@app.route('/download', methods=['GET'])
-def download_csv():
-    """Download the CSV file."""
-    if not os.path.exists(CSV_FILE):
-        return jsonify({'status': 'error', 'message': 'CSV file not found'}), 404
-    return send_file(CSV_FILE, as_attachment=True)
 
-@app.route('/dashboard')
-def dashboard():
-    """Render an HTML dashboard of recent readings."""
-    rows = []
-    if os.path.exists(CSV_FILE):
-        with open(CSV_FILE, newline='') as file:
-            reader = csv.DictReader(file)
-            rows = list(reader)
+@app.route('/view/<filename>')
+def view_log(filename):
+    path = os.path.join(LOG_DIR, filename)
+    if not os.path.exists(path):
+        abort(404)
+
+    with open(path, newline='') as f:
+        rows = list(csv.reader(f))
 
     html = """
-    <!DOCTYPE html>
-    <html lang="en">
+    <html>
     <head>
-        <meta charset="UTF-8">
-        <title>Trash Bin Dashboard</title>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <title>{{ filename }}</title>
         <style>
-            body { font-family: sans-serif; margin: 40px; background: #111; color: white; }
-            h1 { color: #6cf; }
-            table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-            th, td { border: 1px solid #333; padding: 8px; text-align: center; }
+            body { background: #111; color: white; font-family: monospace; margin: 30px; }
+            h2 { color: #6cf; }
+            table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+            th, td { border: 1px solid #333; padding: 6px; text-align: left; }
             tr:nth-child(even) { background: #222; }
-            canvas { margin-top: 30px; width: 100%; max-height: 400px; }
+            a { color: #6cf; text-decoration: none; }
         </style>
     </head>
     <body>
-        <h1>Trash Bin Dashboard</h1>
-        <p>Live data from all bins. Last update: {{ rows[-1]['timestamp'] if rows else 'No data yet' }}</p>
-        <canvas id="chart"></canvas>
+        <h2>{{ filename }}</h2>
         <table>
-            <tr><th>Timestamp</th><th>Bin ID</th><th>Fill Level (%)</th></tr>
-            {% for row in rows[-30:] %}
-                <tr><td>{{ row['timestamp'] }}</td><td>{{ row['trash_can_id'] }}</td><td>{{ row['fill_level'] }}</td></tr>
+            {% for row in rows %}
+                <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
             {% endfor %}
         </table>
-        <script>
-            const data = {
-                labels: {{ rows[-30:] | map(attribute='timestamp') | list | safe }},
-                datasets: [{
-                    label: 'Fill Level (%)',
-                    data: {{ rows[-30:] | map(attribute='fill_level') | list | safe }},
-                    borderColor: '#6cf',
-                    backgroundColor: '#6cf2',
-                    fill: true,
-                    tension: 0.3
-                }]
-            };
-            new Chart(document.getElementById('chart'), {
-                type: 'line',
-                data: data,
-                options: { scales: { y: { min: 0, max: 100 } } }
-            });
-        </script>
+        <br><a href="/">← Back</a>
     </body>
     </html>
     """
+    return render_template_string(html, filename=filename, rows=rows)
 
-    return render_template_string(html, rows=rows)
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    path = os.path.join(LOG_DIR, filename)
+    if not os.path.exists(path):
+        abort(404)
+    return send_file(path, as_attachment=True)
+
+
+@app.route('/download_all')
+def download_all():
+    mem_zip = io.BytesIO()
+    with zipfile.ZipFile(mem_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for file in os.listdir(LOG_DIR):
+            zf.write(os.path.join(LOG_DIR, file), file)
+    mem_zip.seek(0)
+    return send_file(mem_zip, as_attachment=True, download_name="all_trash_logs.zip")
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
