@@ -64,6 +64,7 @@ def add_data():
     timestamp = data.get('timestamp', datetime.now().isoformat())
     trash_can_id = data.get('trash_can_id', 'unknown')
     fill_level = data.get('fill_level', 0)
+    distance_cm = data.get('distance_cm', None)  # <--- NEW
 
     filename = f"trash_{datetime.now().date()}.csv"
     path = os.path.join(LOG_DIR, filename)
@@ -72,8 +73,8 @@ def add_data():
     with open(path, 'a', newline='') as f:
         writer = csv.writer(f)
         if write_header:
-            writer.writerow(['timestamp', 'trash_can_id', 'fill_level'])
-        writer.writerow([timestamp, trash_can_id, fill_level])
+            writer.writerow(['timestamp', 'trash_can_id', 'fill_level', 'distance_cm'])
+        writer.writerow([timestamp, trash_can_id, fill_level, distance_cm])
 
     return jsonify({'status': 'success', 'saved_to': filename}), 200
 
