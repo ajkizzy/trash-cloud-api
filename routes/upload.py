@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, request
-from datetime import datetime, timedelta
+from datetime import datetime
 import csv
 import io
 
@@ -21,130 +21,89 @@ def upload_test_predictions():
             error = "Please choose a CSV file to upload."
         else:
             try:
-                # Wrap uploaded file as text
                 text_stream = io.TextIOWrapper(
                     file.stream, encoding="utf-8", newline=""
                 )
                 reader = csv.DictReader(text_stream)
 
-                if not reader.fieldnames:
-                    error = "CSV appears to have no header row."
-                else:
-                    fields = [c.strip() for c in reader.fieldnames]
-                    print("🔎 CSV columns:", fields)
+                max_rows = 5000  # safety limit for Render free tier
+                created_bins = 0
+                created_preds = 0
 
-                    # Try to guess column names
-                    def pick(*candidates):
-                        for c in candidates:
-                            if c in fields:
-                                return c
-                        return None
+                for i, row in enumerate(reader):
+                    if i >= max_rows:
+                        break
 
-                    bin_col = pick("bin_id", "BinID", "ContainerID", "container_id")
-                    fill_col = pick(
-                        "current_fill_pct",
-                        "fill_pct",
-                        "fill_percent",
-                        "fill_percentage",
-                    )
-                    pred_full_col = pick(
-                        "predicted_full_at", "predicted_full_time", "full_at"
-                    )
-                    pred_ts_col = pick("prediction_ts", "ts", "timestamp")
-                    pred_hrs_col = pick(
-                        "predicted_hrs_to_90",
-                        "hrs_to_90",
-                        "hours_to_90",
-                        "hours_to_full",
-                    )
+                    bin_code = (row.get("bin_id") or "").strip()
+                    if not bin_code:
+                        continue
 
-                    if not bin_col:
-                        raise ValueError(
-                            "Could not find a bin ID column. "
-                            "Expected one of: bin_id, BinID, ContainerID, container_id."
+                    # --- Upsert Bin with location info ---
+                    bin_obj = Bin.query.filter_by(trash_can_id=bin_code).first()
+
+                    lat_raw = row.get("lat")
+                    lon_raw = row.get("lon")
+                    loc_name = row.get("location_name") or None
+
+                    try:
+                        lat = float(lat_raw) if lat_raw not in (None, "", "NaN") else None
+                    except ValueError:
+                        lat = None
+
+                    try:
+                        lon = float(lon_raw) if lon_raw not in (None, "", "NaN") else None
+                    except ValueError:
+                        lon = None
+
+                    if not bin_obj:
+                        bin_obj = Bin(
+                            trash_can_id=bin_code,
+                            lat=lat,
+                            lon=lon,
+                            location_name=loc_name or "Unknown",
                         )
+                        db.session.add(bin_obj)
+                        created_bins += 1
+                    else:
+                        # update existing bin’s location info if we have values
+                        if lat is not None:
+                            bin_obj.lat = lat
+                        if lon is not None:
+                            bin_obj.lon = lon
+                        if loc_name:
+                            bin_obj.location_name = loc_name
 
-                    if not fill_col:
-                        raise ValueError(
-                            "Could not find a fill percentage column. "
-                            "Expected one of: current_fill_pct, fill_pct, fill_percent."
-                        )
+                    # --- Prediction values ---
+                    try:
+                        fill_pct = float(row.get("current_fill_pct") or 0)
+                    except ValueError:
+                        fill_pct = 0.0
 
-                    created_bins = 0
-                    created_preds = 0
-
-                    for row in reader:
-                        bin_code = (row.get(bin_col) or "").strip()
-                        if not bin_code:
-                            continue
-
-                        # Find or create bin
-                        bin_obj = Bin.query.filter_by(trash_can_id=bin_code).first()
-                        if not bin_obj:
-                            bin_obj = Bin(trash_can_id=bin_code)
-                            db.session.add(bin_obj)
-                            created_bins += 1
-
-                        # Fill %
+                    pf_str = (row.get("predicted_full_at") or "").strip()
+                    pf_at = None
+                    if pf_str:
                         try:
-                            fill_pct = float(row.get(fill_col) or 0)
+                            pf_at = datetime.fromisoformat(pf_str)
                         except ValueError:
-                            fill_pct = 0.0
+                            try:
+                                pf_at = datetime.strptime(pf_str, "%Y-%m-%d %H:%M:%S")
+                            except ValueError:
+                                pf_at = None
 
-                        # Predicted full timestamp: several fallbacks
-                        pf_at = None
-
-                        # 1) Direct predicted_full_at column
-                        if pred_full_col:
-                            pf_str = (row.get(pred_full_col) or "").strip()
-                            if pf_str:
-                                # Try ISO then common formats
-                                for fmt in (
-                                    None,
-                                    "%Y-%m-%d %H:%M:%S",
-                                    "%Y-%m-%dT%H:%M:%S",
-                                ):
-                                    try:
-                                        if fmt is None:
-                                            pf_at = datetime.fromisoformat(pf_str)
-                                        else:
-                                            pf_at = datetime.strptime(pf_str, fmt)
-                                        break
-                                    except ValueError:
-                                        continue
-
-                        # 2) If we have prediction_ts + predicted_hrs_to_90,
-                        #    compute predicted_full_at = ts + hours
-                        if pf_at is None and pred_ts_col and pred_hrs_col:
-                            ts_str = (row.get(pred_ts_col) or "").strip()
-                            hrs_str = (row.get(pred_hrs_col) or "").strip()
-                            if ts_str and hrs_str:
-                                try:
-                                    base_ts = datetime.fromisoformat(ts_str)
-                                except ValueError:
-                                    base_ts = None
-                                try:
-                                    hrs = float(hrs_str)
-                                except ValueError:
-                                    hrs = None
-
-                                if base_ts is not None and hrs is not None:
-                                    pf_at = base_ts + timedelta(hours=hrs)
-
-                        pred = MLPrediction(
-                            bin=bin_obj,
-                            source="test",  # mark as test dataset predictions
-                            predicted_fill_percent=fill_pct,
-                            predicted_full_at=pf_at,
-                        )
-                        db.session.add(pred)
-                        created_preds += 1
-
-                    db.session.commit()
-                    message = (
-                        f"Uploaded successfully: {created_bins} bins, "
-                        f"{created_preds} test predictions inserted."
+                    pred = MLPrediction(
+                        bin=bin_obj,
+                        source="test",
+                        predicted_fill_percent=fill_pct,
+                        predicted_full_at=pf_at,
                     )
+                    db.session.add(pred)
+                    created_preds += 1
+
+                db.session.commit()
+                message = (
+                    f"Uploaded {created_bins} bins and {created_preds} "
+                    f"test predictions (first {max_rows} rows)."
+                )
 
             except Exception as e:
                 db.session.rollback()
