@@ -136,14 +136,17 @@
       tbody.innerHTML = '';
       data.forEach((row, idx) => {
         const tr = document.createElement('tr');
+
+        // NEW: choose coordinates if present, otherwise fall back to name
+        const hasCoords = row.lat != null && row.lon != null;
+        const locationText = hasCoords
+          ? `${Number(row.lat).toFixed(3)}, ${Number(row.lon).toFixed(3)}`
+          : (row.location_name || '-');
+
         tr.innerHTML = `
           <td>${idx + 1}</td>
           <td>${row.bin_id || '-'}</td>
-          <td>${
-              (row.lat != null && row.lon != null)
-                ? `${Number(row.lat).toFixed(3)}, ${Number(row.lon).toFixed(3)}`
-                : (row.location_name || '-')
-          }</td>
+          <td>${locationText}</td>
           <td>${row.predicted_fill_percent != null ? row.predicted_fill_percent.toFixed(1) + '%' : '-'}</td>
           <td>${row.predicted_full_at || '-'}</td>
         `;
