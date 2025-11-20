@@ -21,8 +21,10 @@ def upload_test_predictions():
             error = "Please choose a CSV file to upload."
         else:
             try:
-                # Wrap the file stream as text so csv.DictReader can iterate line by line
-                text_stream = io.TextIOWrapper(file.stream, encoding="utf-8", newline="")
+                # Wrap the uploaded file as text for csv.DictReader
+                text_stream = io.TextIOWrapper(
+                    file.stream, encoding="utf-8", newline=""
+                )
                 reader = csv.DictReader(text_stream)
 
                 created_bins = 0
@@ -50,10 +52,15 @@ def upload_test_predictions():
                     pf_str = row.get("predicted_full_at") or ""
                     pf_at = None
                     if pf_str:
-                        # Try ISO first, fall back to common format
+                        # Try ISO first, then a couple of common formats
+                        tried = False
                         try:
                             pf_at = datetime.fromisoformat(pf_str)
+                            tried = True
                         except ValueError:
+                            pass
+
+                        if not tried:
                             for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
                                 try:
                                     pf_at = datetime.strptime(pf_str, fmt)
@@ -63,7 +70,7 @@ def upload_test_predictions():
 
                     pred = MLPrediction(
                         bin=bin_obj,
-                        source="test",  # mark these as test-dataset predictions
+                        source="test",  # mark as test dataset predictions
                         predicted_fill_percent=fill_pct,
                         predicted_full_at=pf_at,
                     )
@@ -71,7 +78,10 @@ def upload_test_predictions():
                     created_preds += 1
 
                 db.session.commit()
-                message = f"Uploaded successfully: {created_bins} bins, {created_preds} test predictions inserted."
+                message = (
+                    f"Uploaded successfully: {created_bins} bins, "
+                    f"{created_preds} test predictions inserted."
+                )
 
             except Exception as e:
                 db.session.rollback()
