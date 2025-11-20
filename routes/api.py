@@ -11,16 +11,6 @@ def api_predictions():
     """
     Return a list of predictions (test or prototype) ordered by
     predicted full time then fill% desc.
-
-    JSON shape (per row):
-    {
-      "bin_id": "...",
-      "location_name": "...",
-      "lat": 57.048,
-      "lon": 9.921,
-      "predicted_fill_percent": 73.0,
-      "predicted_full_at": "2023-04-03T10:31:19.644012"
-    }
     """
     source = request.args.get("source", "test")  # "test" or "prototype"
 
@@ -41,9 +31,9 @@ def api_predictions():
             {
                 "bin_id": bin_obj.trash_can_id if bin_obj else None,
                 "location_name": bin_obj.location_name if bin_obj else None,
-                # expose as 'lat' / 'lon' for the frontend, but read from your model fields
-                "lat": getattr(bin_obj, "latitude", None),
-                "lon": getattr(bin_obj, "longitude", None),
+                # use the actual column names from Bin model: lat / lon
+                "lat": bin_obj.lat if (bin_obj and hasattr(bin_obj, "lat")) else None,
+                "lon": bin_obj.lon if (bin_obj and hasattr(bin_obj, "lon")) else None,
                 "predicted_fill_percent": p.predicted_fill_percent,
                 "predicted_full_at": (
                     p.predicted_full_at.isoformat() if p.predicted_full_at else None
@@ -60,25 +50,6 @@ def api_predictions():
 def api_route():
     """
     Return the latest route for a given source ("test" or "prototype").
-
-    JSON shape:
-    {
-      "route_id": 1,
-      "name": "Morning Test Route",
-      "source": "test",
-      "stops": [
-        {
-          "order_index": 1,
-          "label": "Bin 6092",
-          "bin_id": "6092",
-          "lat": 57.048,
-          "lon": 9.921,
-          "distance_from_prev_km": 1.23,
-          "est_travel_time_min": 4.5
-        },
-        ...
-      ]
-    }
     """
     source = request.args.get("source", "test")
 
@@ -107,9 +78,9 @@ def api_route():
                 "order_index": s.order_index,
                 "label": s.label,
                 "bin_id": bin_obj.trash_can_id if bin_obj else None,
-                # again, expose as 'lat' / 'lon' for the frontend
-                "lat": getattr(s, "latitude", None),
-                "lon": getattr(s, "longitude", None),
+                # same idea: RouteStop has lat / lon columns
+                "lat": s.lat if hasattr(s, "lat") else None,
+                "lon": s.lon if hasattr(s, "lon") else None,
                 "distance_from_prev_km": s.distance_from_prev_km,
                 "est_travel_time_min": s.est_travel_time_min,
             }
