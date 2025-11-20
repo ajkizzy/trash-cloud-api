@@ -31,9 +31,9 @@ def api_predictions():
             {
                 "bin_id": bin_obj.trash_can_id if bin_obj else None,
                 "location_name": bin_obj.location_name if bin_obj else None,
-                # use the actual column names from Bin model: lat / lon
-                "lat": bin_obj.lat if (bin_obj and hasattr(bin_obj, "lat")) else None,
-                "lon": bin_obj.lon if (bin_obj and hasattr(bin_obj, "lon")) else None,
+                # expose latitude/longitude from DB as lat/lon in JSON
+                "lat": bin_obj.latitude if bin_obj else None,
+                "lon": bin_obj.longitude if bin_obj else None,
                 "predicted_fill_percent": p.predicted_fill_percent,
                 "predicted_full_at": (
                     p.predicted_full_at.isoformat() if p.predicted_full_at else None
@@ -53,7 +53,6 @@ def api_route():
     """
     source = request.args.get("source", "test")
 
-    # Latest route for this source
     route = (
         Route.query.filter_by(source=source)
         .order_by(Route.created_at.desc())
@@ -62,7 +61,6 @@ def api_route():
     if not route:
         return jsonify({"route_id": None, "name": None, "source": source, "stops": []})
 
-    # Stops ordered by the index you store in the DB
     stops = (
         RouteStop.query.filter_by(route_id=route.id)
         .order_by(RouteStop.order_index)
@@ -72,15 +70,13 @@ def api_route():
     stop_list = []
     for s in stops:
         bin_obj = s.bin
-
         stop_list.append(
             {
                 "order_index": s.order_index,
                 "label": s.label,
                 "bin_id": bin_obj.trash_can_id if bin_obj else None,
-                # same idea: RouteStop has lat / lon columns
-                "lat": s.lat if hasattr(s, "lat") else None,
-                "lon": s.lon if hasattr(s, "lon") else None,
+                "lat": s.latitude,
+                "lon": s.longitude,
                 "distance_from_prev_km": s.distance_from_prev_km,
                 "est_travel_time_min": s.est_travel_time_min,
             }
