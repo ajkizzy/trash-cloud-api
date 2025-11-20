@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Smart Waste Collection Dashboard{% endblock %}
+
+{% block content %}
+<h1 class="mb-3">Smart Waste Collection Dashboard</h1>
+<p class="text-secondary mb-4">
+  Demo dashboard for rubbish collectors - test dataset and prototype predictions.
+</p>
+
+<ul class="nav nav-tabs" id="dashboardTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="tab-test-pred" data-bs-toggle="tab"
+            data-bs-target="#panel-test-pred" type="button" role="tab">
+      1. Bins predicted full soon (Test dataset)
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-route" data-bs-toggle="tab"
+            data-bs-target="#panel-route" type="button" role="tab">
+      2. Optimal Route (Test dataset)
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="tab-proto-pred" data-bs-toggle="tab"
+            data-bs-target="#panel-proto-pred" type="button" role="tab">
+      3. Prototype Predictions
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content mt-3">
+  <!-- Tab 1 -->
+  <div class="tab-pane fade show active" id="panel-test-pred" role="tabpanel">
+    <div class="card">
+      <div class="card-body">
+        <h4 class="card-title">Bins predicted to be full soon (Test)</h4>
+        <p class="text-secondary">Sorted by predicted full time or highest fill level.</p>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped table-dark align-middle">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Bin ID</th>
+                <th>Location</th>
+                <th>Fill %</th>
+                <th>Predicted full at</th>
+              </tr>
+            </thead>
+            <tbody id="test-predictions-body">
+              <tr><td colspan="5">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 2 -->
+  <div class="tab-pane fade" id="panel-route" role="tabpanel">
+    <div class="card">
+      <div class="card-body">
+        <h4 class="card-title">Most optimal route (Test)</h4>
+        <p class="text-secondary">Based on ML predictions for the test dataset.</p>
+        <div id="route-map"></div>
+        <div class="mt-3 table-responsive">
+          <table class="table table-sm table-striped table-dark align-middle">
+            <thead>
+              <tr>
+                <th>Stop</th>
+                <th>Label</th>
+                <th>Bin ID</th>
+                <th>Distance from previous (km)</th>
+                <th>Est. travel time (min)</th>
+              </tr>
+            </thead>
+            <tbody id="route-stops-body">
+              <tr><td colspan="5">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 3 -->
+  <div class="tab-pane fade" id="panel-proto-pred" role="tabpanel">
+    <div class="card">
+      <div class="card-body">
+        <h4 class="card-title">Prototype bin predictions</h4>
+        <p class="text-secondary">Live or prototype data predictions.</p>
+        <div class="table-responsive">
+          <table class="table table-sm table-striped table-dark align-middle">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Bin ID</th>
+                <th>Location</th>
+                <th>Fill %</th>
+                <th>Predicted full at</th>
+              </tr>
+            </thead>
+            <tbody id="proto-predictions-body">
+              <tr><td colspan="5">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  async function loadPredictions(source, tbodyId) {
+    const tbody = document.getElementById(tbodyId);
+    tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+
+    try {
+      const res = await fetch('/api/predictions?source=' + encodeURIComponent(source));
+      const data = await res.json();
+
+      if (!Array.isArray(data) || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5">No prediction data found.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = '';
+      data.forEach((row, idx) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${row.bin_id || '-'}</td>
+          <td>${row.location_name || '-'}</td>
+          <td>${row.predicted_fill_percent != null ? row.predicted_fill_percent.toFixed(1) + '%' : '-'}</td>
+          <td>${row.predicted_full_at || '-'}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    } catch (err) {
+      console.error(err);
+      tbody.innerHTML = '<tr><td colspan="5">Error loading data.</td></tr>';
+    }
+  }
+
+  let map;
+  let routeLayer;
+
+  function initMap() {
+    map = L.map('route-map').setView([0, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+  }
+
+  async function loadRoute(source) {
+    const tbody = document.getElementById('route-stops-body');
+    tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+
+    try {
+      const res = await fetch('/api/route?source=' + encodeURIComponent(source));
+      const data = await res.json();
+
+      const stops = data.stops || [];
+      if (stops.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5">No route data found.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = '';
+
+      if (routeLayer) {
+        routeLayer.remove();
+      }
+
+      const latlngs = [];
+
+      stops.forEach((s, idx) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td>${s.label || '-'}</td>
+          <td>${s.bin_id || '-'}</td>
+          <td>${s.distance_from_prev_km != null ? s.distance_from_prev_km.toFixed(2) : '-'}</td>
+          <td>${s.est_travel_time_min != null ? s.est_travel_time_min.toFixed(1) : '-'}</td>
+        `;
+        tbody.appendChild(tr);
+
+        if (s.lat != null && s.lon != null) {
+          const ll = [s.lat, s.lon];
+          latlngs.push(ll);
+          L.marker(ll).addTo(map).bindPopup((s.label || 'Stop') + '<br>Bin: ' + (s.bin_id || '-'));
+        }
+      });
+
+      if (latlngs.length > 0) {
+        routeLayer = L.polyline(latlngs, { weight: 4 }).addTo(map);
+        map.fitBounds(routeLayer.getBounds().pad(0.25));
+      }
+    } catch (err) {
+      console.error(err);
+      tbody.innerHTML = '<tr><td colspan="5">Error loading route.</td></tr>';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    initMap();
+    loadPredictions('test', 'test-predictions-body');
+    loadPredictions('prototype', 'proto-predictions-body');
+    loadRoute('test');
+  });
+</script>
+{% endblock %}
