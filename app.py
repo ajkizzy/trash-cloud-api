@@ -1,6 +1,8 @@
 import os
 from flask import Flask
 from extensions import db
+from routes.upload_route import upload_route_bp
+app.register_blueprint(upload_route_bp)
 
 
 def create_app() -> Flask:
