@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Upload Route CSV (Test dataset)</h2>
+    <p class="text-secondary">
+        Upload <code>route_test_for_dashboard.csv</code> to update Tab 2 (Optimal Route).
+    </p>
+
+    <form method="POST" enctype="multipart/form-data">
+        <div class="mb-3">
+            <label class="form-label">Select CSV file</label>
+            <input type="file" name="csv_file" class="form-control" required>
+        </div>
+
+        <button class="btn btn-primary">Upload Route</button>
+        <a href="/dashboard" class="btn btn-secondary ms-2">Back to dashboard</a>
+    </form>
+</div>
+{% endblock %}
