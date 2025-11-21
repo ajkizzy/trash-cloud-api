@@ -31,11 +31,13 @@ def create_app() -> Flask:
         from routes.api import api_bp
         from routes.dashboard import dashboard_bp
         from routes.upload import upload_bp
+        from routes.upload_route import upload_route_bp
 
         app.register_blueprint(logs_bp)
         app.register_blueprint(api_bp)
         app.register_blueprint(dashboard_bp)
         app.register_blueprint(upload_bp)
+        app.register_blueprint(upload_route_bp)
 
     return app
 
