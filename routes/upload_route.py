@@ -1,56 +1,132 @@
-from flask import Blueprint, render_template, request, redirect, flash
-from models import db, Route, RouteStop
+from flask import Blueprint, render_template, request
+from extensions import db
+from models import Bin, Route, RouteStop
+import csv
+import io
 
-upload_route_bp = Blueprint("upload_route", __name__)
+# This blueprint is mounted with url_prefix="/dev" in app.py
+upload_route_bp = Blueprint("upload_route", __name__, url_prefix="/dev")
 
-@upload_route_bp.route("/dev/upload_route_test", methods=["GET", "POST"])
+
+@upload_route_bp.route("/upload_route_test", methods=["GET", "POST"])
 def upload_route_test():
-    if request.method == "GET":
-        return render_template("upload_route_test.html")
+    """
+    Upload a CSV containing an optimal route for the TEST dataset.
 
-    file = request.files.get("csv_file")
-    if not file:
-        flash("No file selected.", "danger")
-        return redirect(request.url)
+    Expected columns in the CSV:
+      - route_name
+      - order_index
+      - bin_id
+      - lat
+      - lon
+      - distance_from_prev_km
+      - est_travel_time_min
+    """
+    message = None
+    error = None
 
-    import pandas as pd
-    df = pd.read_csv(file)
+    if request.method == "POST":
+        # Support both 'file' and 'csv_file' as input names
+        file = request.files.get("file") or request.files.get("csv_file")
 
-    # Validate required columns
-    required_cols = [
-        "route_name",
-        "order_index",
-        "bin_id",
-        "lat",
-        "lon",
-        "distance_from_prev_km",
-        "est_travel_time_min",
-    ]
-    for col in required_cols:
-        if col not in df.columns:
-            flash(f"Missing column: {col}", "danger")
-            return redirect(request.url)
+        if not file or file.filename == "":
+            error = "Please choose a CSV file to upload."
+        else:
+            try:
+                # Wrap the raw file in a text stream
+                text_stream = io.TextIOWrapper(file.stream, encoding="utf-8", newline="")
+                reader = csv.DictReader(text_stream)
 
-    # Create Route record
-    route = Route(name=df["route_name"][0], source="test")
-    db.session.add(route)
-    db.session.commit()
+                required_cols = [
+                    "route_name",
+                    "order_index",
+                    "bin_id",
+                    "lat",
+                    "lon",
+                    "distance_from_prev_km",
+                    "est_travel_time_min",
+                ]
+                for col in required_cols:
+                    if col not in reader.fieldnames:
+                        raise ValueError(f"Missing required column: {col}")
 
-    # Insert stops
-    for _, row in df.iterrows():
-        stop = RouteStop(
-            route_id=route.id,
-            order_index=int(row["order_index"]),
-            bin_id=str(row["bin_id"]),
-            latitude=float(row["lat"]),
-            longitude=float(row["lon"]),
-            distance_from_prev_km=float(row["distance_from_prev_km"]),
-            est_travel_time_min=float(row["est_travel_time_min"]),
-            label=f"Bin {row['bin_id']}",
-        )
-        db.session.add(stop)
+                # Create a new Route (source="test"), we will attach stops to it
+                route_obj = None
+                stop_count = 0
 
-    db.session.commit()
+                for row in reader:
+                    # lazily create Route once we see first row
+                    if route_obj is None:
+                        route_name = row.get("route_name") or "Test Route"
+                        route_obj = Route(
+                            name=route_name,
+                            source="test",
+                        )
+                        db.session.add(route_obj)
+                        db.session.flush()  # populate route_obj.id
 
-    flash(f"Uploaded route '{route.name}' with {len(df)} stops.", "success")
-    return redirect("/dashboard")
+                    # Parse fields from CSV
+                    bin_code = (row.get("bin_id") or "").strip()
+                    try:
+                        order_index = int(row.get("order_index") or 0)
+                    except ValueError:
+                        order_index = stop_count + 1
+
+                    # Coordinates
+                    try:
+                        lat = float(row.get("lat") or 0)
+                    except ValueError:
+                        lat = 0.0
+
+                    try:
+                        lon = float(row.get("lon") or 0)
+                    except ValueError:
+                        lon = 0.0
+
+                    # Distance + time
+                    try:
+                        dist_km = float(row.get("distance_from_prev_km") or 0)
+                    except ValueError:
+                        dist_km = 0.0
+
+                    try:
+                        travel_min = float(row.get("est_travel_time_min") or 0)
+                    except ValueError:
+                        travel_min = 0.0
+
+                    # Try to look up the Bin by trash_can_id if present
+                    bin_obj = None
+                    if bin_code:
+                        bin_obj = Bin.query.filter_by(trash_can_id=bin_code).first()
+
+                    # Create RouteStop
+                    stop = RouteStop(
+                        route_id=route_obj.id,
+                        order_index=order_index,
+                        label=f"Bin {bin_code}" if bin_code else f"Stop {order_index}",
+                        bin=bin_obj,
+                        latitude=lat,
+                        longitude=lon,
+                        distance_from_prev_km=dist_km,
+                        est_travel_time_min=travel_min,
+                    )
+                    db.session.add(stop)
+                    stop_count += 1
+
+                if route_obj is None:
+                    error = "No valid rows found in CSV."
+                    db.session.rollback()
+                else:
+                    db.session.commit()
+                    message = f"Uploaded route '{route_obj.name}' with {stop_count} stops (test dataset)."
+
+            except Exception as e:
+                db.session.rollback()
+                error = f"Error while processing route CSV: {e}"
+
+    # Render a simple upload page
+    return render_template(
+        "upload_route_test.html",
+        message=message,
+        error=error,
+    )
