@@ -2,19 +2,154 @@
 
 {% block content %}
 <div class="container mt-4">
-    <h2>Upload Route CSV (Test dataset)</h2>
+    <h2>Route Optimization (Test Dataset)</h2>
     <p class="text-secondary">
-        Upload <code>route_test_for_dashboard.csv</code> to update Tab 2 (Optimal Route).
+        Upload a CSV route file OR auto-generate an optimal route using KNN algorithm based on your predictions.
     </p>
 
-    <form method="POST" enctype="multipart/form-data">
-        <div class="mb-3">
-            <label class="form-label">Select CSV file</label>
-            <input type="file" name="csv_file" class="form-control" required>
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+
+    {% if message %}
+    <div class="alert alert-success">{{ message }}</div>
+    {% endif %}
+
+    <!-- Nav tabs for two modes -->
+    <ul class="nav nav-tabs mb-3" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#auto-generate" type="button">
+                Auto-Generate Route (KNN)
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#upload-csv" type="button">
+                Upload CSV
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+        <!-- AUTO-GENERATE TAB -->
+        <div class="tab-pane fade show active" id="auto-generate">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Auto-Generate Optimal Route</h5>
+                    <p class="text-secondary">
+                        Uses KNN (K-Nearest Neighbor) algorithm to create optimal collection route based on uploaded predictions.
+                    </p>
+
+                    <form method="POST">
+                        <input type="hidden" name="auto_generate" value="true">
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Depot Latitude</label>
+                                <input type="number" name="depot_lat" class="form-control" 
+                                       step="0.000001" value="55.6761" required>
+                                <div class="form-text">Starting point latitude</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Depot Longitude</label>
+                                <input type="number" name="depot_lon" class="form-control" 
+                                       step="0.000001" value="12.5683" required>
+                                <div class="form-text">Starting point longitude</div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Fill Level Threshold (%)</label>
+                            <input type="number" name="threshold" class="form-control" 
+                                   min="0" max="100" value="70" required>
+                            <div class="form-text">
+                                Only include bins with fill level above this percentage
+                            </div>
+                        </div>
+
+                        <div class="alert alert-info">
+                            <strong>How it works:</strong>
+                            <ul class="mb-0 mt-2">
+                                <li>Filters bins above the threshold</li>
+                                <li>Starts from depot location</li>
+                                <li>Repeatedly selects nearest unvisited bin (KNN with K=1)</li>
+                                <li>Calculates distances and travel times</li>
+                                <li>Returns to depot at the end</li>
+                            </ul>
+                        </div>
+
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-cpu"></i> Generate Optimal Route
+                        </button>
+                        <a href="/dashboard" class="btn btn-secondary ms-2">Back to Dashboard</a>
+                    </form>
+                </div>
+            </div>
         </div>
 
-        <button class="btn btn-primary">Upload Route</button>
-        <a href="/dashboard" class="btn btn-secondary ms-2">Back to dashboard</a>
-    </form>
+        <!-- UPLOAD CSV TAB -->
+        <div class="tab-pane fade" id="upload-csv">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Upload Pre-Generated Route CSV</h5>
+                    <p class="text-secondary">
+                        Upload <code>route_test_for_dashboard.csv</code> with route data.
+                    </p>
+
+                    <form method="POST" enctype="multipart/form-data">
+                        <div class="mb-3">
+                            <label class="form-label">Route Name (Optional)</label>
+                            <input type="text" name="route_name" class="form-control" 
+                                   placeholder="e.g., Morning Collection Route">
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Select CSV file</label>
+                            <input type="file" name="file" class="form-control" accept=".csv" required>
+                            <div class="form-text">
+                                Expected columns: <code>order_index, bin_id, lat, lon, distance_from_prev_km, est_travel_time_min</code>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">Upload Route CSV</button>
+                        <a href="/dashboard" class="btn btn-secondary ms-2">Back to Dashboard</a>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CSV Format Reference -->
+    <div class="card mt-4">
+        <div class="card-body">
+            <h6 class="card-title">CSV Format Reference</h6>
+            <pre class="bg-dark p-3 text-light rounded"><code>order_index,bin_id,lat,lon,distance_from_prev_km,est_travel_time_min,label
+0,DEPOT,55.6761,12.5683,0.0,0.0,Depot Start
+1,BIN001,55.6800,12.5700,0.5,1.0,Bin BIN001
+2,BIN003,55.6820,12.5720,0.3,0.6,Bin BIN003
+3,DEPOT,55.6761,12.5683,0.7,1.4,Depot End</code></pre>
+        </div>
+    </div>
 </div>
+
+<style>
+    .card {
+        background: #1b1b1b;
+        border: 1px solid #333;
+    }
+    .form-control, .form-select {
+        background: #2a2a2a;
+        border-color: #444;
+        color: #eee;
+    }
+    .form-control:focus, .form-select:focus {
+        background: #333;
+        border-color: #0d6efd;
+        color: #eee;
+    }
+    .alert-info {
+        background: #1a3a52;
+        border-color: #0d6efd;
+        color: #9dd0f7;
+    }
+</style>
 {% endblock %}
