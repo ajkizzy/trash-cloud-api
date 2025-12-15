@@ -1,234 +1,168 @@
-from flask import Blueprint, render_template, request, jsonify
-from extensions import db
-from models import Bin, Route, RouteStop, MLPrediction
-import csv
-import io
+"""
+Route optimization using KNN for smart waste collection.
+This module calculates optimal routes based on bin fill predictions.
+"""
+from datetime import datetime, timedelta
+from typing import List, Dict, Tuple
+import math
 
-# This blueprint is mounted with url_prefix="/dev" in app.py
-upload_route_bp = Blueprint("upload_route", __name__, url_prefix="/dev")
 
-
-@upload_route_bp.route("/upload_route_test", methods=["GET", "POST"])
-def upload_route_test():
-    """
-    Upload a CSV containing an optimal route OR generate route from predictions.
+class RouteOptimizer:
+    """Optimizes collection routes using KNN-based nearest neighbor algorithm."""
     
-    Two modes:
-    1. Upload CSV with route data
-    2. Auto-generate route from existing predictions using KNN
-    """
-    message = None
-    error = None
-
-    if request.method == "POST":
-        # Check if user wants to generate route automatically
-        auto_generate = request.form.get("auto_generate") == "true"
+    def __init__(self, depot_lat: float = 0.0, depot_lon: float = 0.0):
+        """
+        Initialize route optimizer.
         
-        if auto_generate:
-            try:
-                # Generate route from predictions
-                from route_optimizer import RouteOptimizer
-                
-                # Get all test predictions with coordinates
-                predictions = (
-                    MLPrediction.query
-                    .join(Bin)
-                    .filter(MLPrediction.source == "test")
-                    .filter(Bin.latitude.isnot(None))
-                    .filter(Bin.longitude.isnot(None))
-                    .order_by(MLPrediction.predicted_fill_percent.desc())
-                    .all()
-                )
-                
-                if not predictions:
-                    error = "No predictions found with coordinates. Upload predictions first."
-                    return render_template("upload_route_test.html", message=message, error=error)
-                
-                # Prepare bin data for optimizer
-                bins = []
-                for pred in predictions:
-                    bins.append({
-                        'bin_id': pred.bin.trash_can_id,
-                        'lat': pred.bin.latitude,
-                        'lon': pred.bin.longitude,
-                        'predicted_fill_percent': pred.predicted_fill_percent
-                    })
-                
-                # Get depot coordinates (use first bin or default)
-                depot_lat = float(request.form.get("depot_lat", bins[0]['lat'] if bins else 0))
-                depot_lon = float(request.form.get("depot_lon", bins[0]['lon'] if bins else 0))
-                threshold = float(request.form.get("threshold", 70.0))
-                
-                # Initialize optimizer and generate route
-                optimizer = RouteOptimizer(depot_lat, depot_lon)
-                route_stops = optimizer.optimize_route(bins, priority_threshold=threshold)
-                
-                if not route_stops:
-                    error = f"No bins found above {threshold}% fill level."
-                    return render_template("upload_route_test.html", message=message, error=error)
-                
-                # Clear existing test routes
-                existing_routes = Route.query.filter_by(source="test").all()
-                for r in existing_routes:
-                    RouteStop.query.filter_by(route_id=r.id).delete()
-                    db.session.delete(r)
-                
-                # Create new route
-                stats = optimizer.calculate_route_stats(route_stops)
-                route_name = f"Auto Route (Test) - {stats['total_stops']} bins"
-                
-                route_obj = Route(name=route_name, source="test")
-                db.session.add(route_obj)
-                db.session.flush()
-                
-                # Add stops
-                for stop_data in route_stops:
-                    bin_obj = None
-                    if stop_data['bin_id']:
-                        bin_obj = Bin.query.filter_by(trash_can_id=stop_data['bin_id']).first()
-                    
-                    stop = RouteStop(
-                        route_id=route_obj.id,
-                        order_index=stop_data['order_index'],
-                        label=stop_data['label'],
-                        bin=bin_obj,
-                        latitude=stop_data['lat'],
-                        longitude=stop_data['lon'],
-                        distance_from_prev_km=stop_data['distance_from_prev_km'],
-                        est_travel_time_min=stop_data['est_travel_time_min']
-                    )
-                    db.session.add(stop)
-                
-                db.session.commit()
-                
-                message = (
-                    f"Generated optimal route with {stats['total_stops']} bins. "
-                    f"Total distance: {stats['total_distance_km']} km, "
-                    f"Est. time: {stats['total_time_hours']} hours"
-                )
-                
-            except Exception as e:
-                db.session.rollback()
-                error = f"Error generating route: {e}"
+        Args:
+            depot_lat: Depot latitude (starting point)
+            depot_lon: Depot longitude (starting point)
+        """
+        self.depot_lat = depot_lat
+        self.depot_lon = depot_lon
+        self.avg_speed_kmh = 30  # Average vehicle speed
+    
+    def haversine_distance(self, lat1: float, lon1: float, 
+                          lat2: float, lon2: float) -> float:
+        """
+        Calculate distance between two coordinates using Haversine formula.
         
-        else:
-            # Upload CSV mode
-            file = request.files.get("file") or request.files.get("csv_file")
-
-            if not file or file.filename == "":
-                error = "Please choose a CSV file to upload."
-            else:
-                try:
-                    text_stream = io.TextIOWrapper(file.stream, encoding="utf-8", newline="")
-                    reader = csv.DictReader(text_stream)
-
-                    required_cols = [
-                        "order_index", "bin_id", "lat", "lon",
-                        "distance_from_prev_km", "est_travel_time_min"
-                    ]
-                    
-                    missing_cols = [col for col in required_cols if col not in reader.fieldnames]
-                    if missing_cols:
-                        raise ValueError(f"Missing columns: {', '.join(missing_cols)}")
-
-                    # Clear existing test routes
-                    existing_routes = Route.query.filter_by(source="test").all()
-                    for r in existing_routes:
-                        RouteStop.query.filter_by(route_id=r.id).delete()
-                        db.session.delete(r)
-                    
-                    route_name = request.form.get("route_name", "Uploaded Test Route")
-                    route_obj = Route(name=route_name, source="test")
-                    db.session.add(route_obj)
-                    db.session.flush()
-
-                    stop_count = 0
-                    for row in reader:
-                        bin_code = (row.get("bin_id") or "").strip()
-                        
-                        try:
-                            order_index = int(row.get("order_index") or 0)
-                        except ValueError:
-                            order_index = stop_count
-
-                        try:
-                            lat = float(row.get("lat") or 0)
-                            lon = float(row.get("lon") or 0)
-                            dist_km = float(row.get("distance_from_prev_km") or 0)
-                            travel_min = float(row.get("est_travel_time_min") or 0)
-                        except ValueError as e:
-                            raise ValueError(f"Invalid numeric value in row {stop_count + 1}: {e}")
-
-                        bin_obj = None
-                        if bin_code:
-                            bin_obj = Bin.query.filter_by(trash_can_id=bin_code).first()
-
-                        label = row.get("label", f"Bin {bin_code}" if bin_code else f"Stop {order_index}")
-
-                        stop = RouteStop(
-                            route_id=route_obj.id,
-                            order_index=order_index,
-                            label=label,
-                            bin=bin_obj,
-                            latitude=lat,
-                            longitude=lon,
-                            distance_from_prev_km=dist_km,
-                            est_travel_time_min=travel_min
-                        )
-                        db.session.add(stop)
-                        stop_count += 1
-
-                    if stop_count == 0:
-                        error = "No valid rows found in CSV."
-                        db.session.rollback()
-                    else:
-                        db.session.commit()
-                        message = f"Uploaded route '{route_obj.name}' with {stop_count} stops."
-
-                except Exception as e:
-                    db.session.rollback()
-                    error = f"Error processing CSV: {e}"
-
-    return render_template("upload_route_test.html", message=message, error=error)
-
-
-@upload_route_bp.route("/generate_route_api", methods=["POST"])
-def generate_route_api():
-    """API endpoint to generate route programmatically."""
-    try:
-        data = request.get_json() or {}
-        depot_lat = float(data.get("depot_lat", 0))
-        depot_lon = float(data.get("depot_lon", 0))
-        threshold = float(data.get("threshold", 70.0))
-        source = data.get("source", "test")
+        Returns:
+            Distance in kilometers
+        """
+        R = 6371  # Earth radius in km
         
-        from route_optimizer import RouteOptimizer
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
         
-        predictions = (
-            MLPrediction.query
-            .join(Bin)
-            .filter(MLPrediction.source == source)
-            .filter(Bin.latitude.isnot(None))
-            .filter(Bin.longitude.isnot(None))
-            .all()
-        )
+        a = (math.sin(dlat / 2) ** 2 + 
+             math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
+             math.sin(dlon / 2) ** 2)
         
-        bins = [{
-            'bin_id': p.bin.trash_can_id,
-            'lat': p.bin.latitude,
-            'lon': p.bin.longitude,
-            'predicted_fill_percent': p.predicted_fill_percent
-        } for p in predictions]
+        c = 2 * math.asin(math.sqrt(a))
+        return R * c
+    
+    def find_nearest_neighbor(self, current: Tuple[float, float], 
+                             candidates: List[Dict]) -> Tuple[int, Dict]:
+        """
+        Find nearest unvisited bin using KNN (K=1).
         
-        optimizer = RouteOptimizer(depot_lat, depot_lon)
-        route_stops = optimizer.optimize_route(bins, priority_threshold=threshold)
-        stats = optimizer.calculate_route_stats(route_stops)
+        Args:
+            current: Current position (lat, lon)
+            candidates: List of candidate bins with coordinates
+            
+        Returns:
+            Tuple of (index, bin_dict)
+        """
+        min_dist = float('inf')
+        nearest_idx = -1
+        nearest_bin = None
         
-        return jsonify({
-            "success": True,
-            "route": route_stops,
-            "stats": stats
+        for idx, bin_data in enumerate(candidates):
+            dist = self.haversine_distance(
+                current[0], current[1],
+                bin_data['lat'], bin_data['lon']
+            )
+            
+            if dist < min_dist:
+                min_dist = dist
+                nearest_idx = idx
+                nearest_bin = bin_data
+        
+        return nearest_idx, nearest_bin
+    
+    def optimize_route(self, bins: List[Dict], 
+                      priority_threshold: float = 80.0) -> List[Dict]:
+        """
+        Create optimized route using nearest neighbor algorithm.
+        
+        Args:
+            bins: List of bins with coordinates and fill levels
+            priority_threshold: Minimum fill % to include in route
+            
+        Returns:
+            List of route stops in optimal order
+        """
+        # Filter bins that need collection
+        priority_bins = [
+            b for b in bins 
+            if b.get('predicted_fill_percent', 0) >= priority_threshold
+        ]
+        
+        if not priority_bins:
+            return []
+        
+        route = []
+        unvisited = priority_bins.copy()
+        current_pos = (self.depot_lat, self.depot_lon)
+        
+        # Start from depot
+        route.append({
+            'order_index': 0,
+            'label': 'Depot (Start)',
+            'bin_id': None,
+            'lat': self.depot_lat,
+            'lon': self.depot_lon,
+            'distance_from_prev_km': 0.0,
+            'est_travel_time_min': 0.0
         })
         
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 400
+        # Visit bins using nearest neighbor
+        while unvisited:
+            nearest_idx, nearest_bin = self.find_nearest_neighbor(
+                current_pos, unvisited
+            )
+            
+            # Calculate distance and time
+            distance = self.haversine_distance(
+                current_pos[0], current_pos[1],
+                nearest_bin['lat'], nearest_bin['lon']
+            )
+            travel_time = (distance / self.avg_speed_kmh) * 60  # minutes
+            
+            # Add stop to route
+            route.append({
+                'order_index': len(route),
+                'label': f"Bin {nearest_bin['bin_id']}",
+                'bin_id': nearest_bin['bin_id'],
+                'lat': nearest_bin['lat'],
+                'lon': nearest_bin['lon'],
+                'distance_from_prev_km': round(distance, 2),
+                'est_travel_time_min': round(travel_time, 1),
+                'predicted_fill_percent': nearest_bin.get('predicted_fill_percent', 0)
+            })
+            
+            # Update position and remove visited bin
+            current_pos = (nearest_bin['lat'], nearest_bin['lon'])
+            unvisited.pop(nearest_idx)
+        
+        # Return to depot
+        distance = self.haversine_distance(
+            current_pos[0], current_pos[1],
+            self.depot_lat, self.depot_lon
+        )
+        travel_time = (distance / self.avg_speed_kmh) * 60
+        
+        route.append({
+            'order_index': len(route),
+            'label': 'Depot (End)',
+            'bin_id': None,
+            'lat': self.depot_lat,
+            'lon': self.depot_lon,
+            'distance_from_prev_km': round(distance, 2),
+            'est_travel_time_min': round(travel_time, 1)
+        })
+        
+        return route
+    
+    def calculate_route_stats(self, route: List[Dict]) -> Dict:
+        """Calculate statistics for a route."""
+        total_distance = sum(stop['distance_from_prev_km'] for stop in route)
+        total_time = sum(stop['est_travel_time_min'] for stop in route)
+        
+        return {
+            'total_stops': len(route) - 2,  # Exclude depot start/end
+            'total_distance_km': round(total_distance, 2),
+            'total_time_min': round(total_time, 1),
+            'total_time_hours': round(total_time / 60, 2)
+        }
