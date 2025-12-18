@@ -12,17 +12,14 @@ api_bp = Blueprint("api", __name__)
 def api_predictions():
     """
     Return a list of predictions (test or prototype) ordered by
-    predicted full time then fill% desc.
+    recorded time (created_at) descending - latest first.
     """
     source = request.args.get("source", "test")  # "test" or "prototype"
 
     query = (
         MLPrediction.query.join(Bin)
         .filter(MLPrediction.source == source)
-        .order_by(
-            MLPrediction.predicted_full_at,
-            MLPrediction.predicted_fill_percent.desc(),
-        )
+        .order_by(MLPrediction.created_at.desc())  # Latest first
     )
 
     results = []
@@ -39,6 +36,9 @@ def api_predictions():
                 "predicted_fill_percent": p.predicted_fill_percent,
                 "predicted_full_at": (
                     p.predicted_full_at.isoformat() if p.predicted_full_at else None
+                ),
+                "recorded_at": (
+                    p.created_at.isoformat() if p.created_at else None
                 ),
             }
         )
