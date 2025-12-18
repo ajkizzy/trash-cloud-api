@@ -174,7 +174,7 @@
           </div>
           <div class="col-md-3">
             <div class="stat-card">
-              <div class="stat-label">High Priority (≥80%)</div>
+              <div class="stat-label">Urgent (≥80%)</div>
               <div class="stat-value text-danger" id="proto-high-priority">-</div>
             </div>
           </div>
@@ -195,12 +195,13 @@
                 <th>Bin ID</th>
                 <th>Location</th>
                 <th>Fill %</th>
+                <th>Recorded At</th>
                 <th>Predicted Full At</th>
                 <th>Status</th>
               </tr>
             </thead>
             <tbody id="proto-predictions-body">
-              <tr><td colspan="6" class="text-center">Loading...</td></tr>
+              <tr><td colspan="7" class="text-center">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -352,6 +353,45 @@
   let autoRefreshInterval;
 
   /* ======================================================
+     UTILITY FUNCTIONS
+  ====================================================== */
+  function formatDateTime(isoString) {
+    if (!isoString) return '-';
+    const date = new Date(isoString);
+    return date.toLocaleString('en-GB', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+  }
+
+  function getStatusInfo(fillPercent) {
+    if (fillPercent >= 80) {
+      return {
+        label: 'URGENT',
+        class: 'bg-danger',
+        description: 'Bin near full or full, prioritised for compaction or collection'
+      };
+    } else if (fillPercent >= 50) {
+      return {
+        label: 'MEDIUM',
+        class: 'bg-warning',
+        description: 'Bin approaching capacity, monitor closely'
+      };
+    } else {
+      return {
+        label: 'LOW',
+        class: 'bg-success',
+        description: 'Bin operating at low capacity, no action required'
+      };
+    }
+  }
+
+  /* ======================================================
      TAB MANAGEMENT
   ====================================================== */
   function updateUploadButtons(activeTab) {
@@ -386,14 +426,14 @@
   ====================================================== */
   async function loadPredictions(source, tbodyId) {
     const tbody = document.getElementById(tbodyId);
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center">Loading...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center">Loading...</td></tr>';
 
     try {
       const res = await fetch('/api/predictions?source=' + source);
       const data = await res.json();
 
       if (!data.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-secondary">No predictions found. Connect your Raspberry Pi to send data.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-secondary">No predictions found. Connect your Raspberry Pi to send data.</td></tr>';
         
         if (source === 'prototype') {
           document.getElementById('proto-total-bins').textContent = '0';
@@ -410,10 +450,8 @@
       data.forEach((row, idx) => {
         const tr = document.createElement('tr');
         const location = (row.lat && row.lon) ? `${row.lat.toFixed(4)}, ${row.lon.toFixed(4)}` : (row.location_name || '-');
-        const fillClass = row.predicted_fill_percent >= 80 ? 'text-danger' : row.predicted_fill_percent >= 60 ? 'text-warning' : 'text-success';
-        const statusBadge = row.predicted_fill_percent >= 80 ? '<span class="badge bg-danger">URGENT</span>' : 
-                           row.predicted_fill_percent >= 60 ? '<span class="badge bg-warning">MEDIUM</span>' : 
-                           '<span class="badge bg-success">LOW</span>';
+        const fillClass = row.predicted_fill_percent >= 80 ? 'text-danger' : row.predicted_fill_percent >= 50 ? 'text-warning' : 'text-success';
+        const statusInfo = getStatusInfo(row.predicted_fill_percent);
 
         totalFill += row.predicted_fill_percent || 0;
         if (row.predicted_fill_percent >= 80) highPriority++;
@@ -423,8 +461,9 @@
           <td><code>${row.bin_id || '-'}</code></td>
           <td><small>${location}</small></td>
           <td class="${fillClass}"><strong>${row.predicted_fill_percent != null ? row.predicted_fill_percent.toFixed(1) + '%' : '-'}</strong></td>
-          <td><small>${row.predicted_full_at || '-'}</small></td>
-          <td>${statusBadge}</td>
+          <td><small>${formatDateTime(row.recorded_at)}</small></td>
+          <td><small>${row.predicted_full_at ? formatDateTime(row.predicted_full_at) : '-'}</small></td>
+          <td><span class="badge ${statusInfo.class}" title="${statusInfo.description}">${statusInfo.label}</span></td>
         `;
         tbody.appendChild(tr);
       });
@@ -439,7 +478,7 @@
 
     } catch (err) {
       console.error(err);
-      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error loading data</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Error loading data</td></tr>';
     }
   }
 
@@ -469,7 +508,7 @@
       data.forEach((bin) => {
         if (bin.lat && bin.lon) {
           const fillPct = bin.predicted_fill_percent || 0;
-          const color = fillPct >= 80 ? '#dc3545' : fillPct >= 60 ? '#ffc107' : '#6c757d';
+          const color = fillPct >= 80 ? '#dc3545' : fillPct >= 50 ? '#ffc107' : '#28a745';
           
           const marker = L.circleMarker([bin.lat, bin.lon], {
             radius: 6,
