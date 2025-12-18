@@ -232,3 +232,81 @@ def generate_route_api():
         
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 400
+@upload_route_bp.route("/generate_prototype_route", methods=["POST"])
+def generate_prototype_route():
+    """Generate route for prototype bins."""
+    try:
+        data = request.get_json() or {}
+        depot_lat = float(data.get("depot_lat", 55.6761))
+        depot_lon = float(data.get("depot_lon", 12.5683))
+        threshold = float(data.get("threshold", 70.0))
+        
+        from route_optimizer import RouteOptimizer
+        
+        # Get prototype predictions
+        predictions = (
+            MLPrediction.query
+            .join(Bin)
+            .filter(MLPrediction.source == "prototype")
+            .filter(Bin.latitude.isnot(None))
+            .filter(Bin.longitude.isnot(None))
+            .all()
+        )
+        
+        if not predictions:
+            return jsonify({"success": False, "error": "No prototype predictions found"}), 404
+        
+        bins = [{
+            'bin_id': p.bin.trash_can_id,
+            'lat': p.bin.latitude,
+            'lon': p.bin.longitude,
+            'predicted_fill_percent': p.predicted_fill_percent
+        } for p in predictions]
+        
+        optimizer = RouteOptimizer(depot_lat, depot_lon)
+        route_stops = optimizer.optimize_route(bins, priority_threshold=threshold)
+        
+        if not route_stops:
+            return jsonify({"success": False, "error": f"No bins above {threshold}% threshold"}), 404
+        
+        # Clear old prototype routes
+        existing_routes = Route.query.filter_by(source="prototype").all()
+        for r in existing_routes:
+            RouteStop.query.filter_by(route_id=r.id).delete()
+            db.session.delete(r)
+        
+        # Create new route
+        stats = optimizer.calculate_route_stats(route_stops)
+        route_obj = Route(name=f"Prototype Route - {stats['total_stops']} bins", source="prototype")
+        db.session.add(route_obj)
+        db.session.flush()
+        
+        # Add stops
+        for stop_data in route_stops:
+            bin_obj = None
+            if stop_data['bin_id']:
+                bin_obj = Bin.query.filter_by(trash_can_id=stop_data['bin_id']).first()
+            
+            stop = RouteStop(
+                route_id=route_obj.id,
+                order_index=stop_data['order_index'],
+                label=stop_data['label'],
+                bin=bin_obj,
+                latitude=stop_data['lat'],
+                longitude=stop_data['lon'],
+                distance_from_prev_km=stop_data['distance_from_prev_km'],
+                est_travel_time_min=stop_data['est_travel_time_min']
+            )
+            db.session.add(stop)
+        
+        db.session.commit()
+        
+        return jsonify({
+            "success": True,
+            "route": route_stops,
+            "stats": stats
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
