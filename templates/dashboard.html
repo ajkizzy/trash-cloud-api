@@ -7,7 +7,6 @@
 <!-- =================== HEADER =================== -->
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="mb-0">Smart Waste Collection Dashboard</h1>
-
     <div>
         <a href="/dev/upload_test_predictions" 
            class="btn btn-outline-info me-2"
@@ -35,14 +34,12 @@
       1. Predictions (Test)
     </button>
   </li>
-
   <li class="nav-item" role="presentation">
     <button class="nav-link" id="tab-route" data-bs-toggle="tab"
             data-bs-target="#panel-route" type="button" role="tab">
       2. Optimal Route (Test)
     </button>
   </li>
-
   <li class="nav-item" role="presentation">
     <button class="nav-link" id="tab-proto-pred" data-bs-toggle="tab"
             data-bs-target="#panel-proto-pred" type="button" role="tab">
@@ -54,13 +51,12 @@
 <!-- =================== TAB CONTENT =================== -->
 <div class="tab-content mt-3">
 
-  <!-- ------------ TAB 1: PREDICTIONS ------------ -->
+  <!-- ------------ TAB 1: TEST PREDICTIONS ------------ -->
   <div class="tab-pane fade show active" id="panel-test-pred" role="tabpanel">
     <div class="card">
       <div class="card-body">
-        <h4 class="card-title">Bins Predicted Full Soon</h4>
+        <h4 class="card-title">Bins Predicted Full Soon (Test Dataset)</h4>
         <p class="text-secondary">ML predictions sorted by urgency</p>
-
         <div class="table-responsive">
           <table class="table table-sm table-striped table-dark align-middle">
             <thead>
@@ -81,36 +77,40 @@
     </div>
   </div>
 
-  <!-- ------------ TAB 2: ROUTE ------------ -->
+  <!-- ------------ TAB 2: TEST ROUTE ------------ -->
   <div class="tab-pane fade" id="panel-route" role="tabpanel">
     <div class="card mb-3">
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-center mb-3">
-          <h4 class="card-title mb-0">Optimal Collection Route (KNN)</h4>
-          <button class="btn btn-sm btn-outline-info" onclick="refreshRoute()">
-            Refresh Route
-          </button>
+          <h4 class="card-title mb-0">Optimal Collection Route (Test - KNN)</h4>
+          <div>
+            <button class="btn btn-sm btn-outline-secondary me-2" onclick="toggleAllBins('test')">
+              <span id="bins-toggle-text-test">Show All Bins</span>
+            </button>
+            <button class="btn btn-sm btn-outline-info" onclick="refreshRoute('test')">
+              🔄 Refresh
+            </button>
+          </div>
         </div>
-        <p class="text-secondary">Nearest neighbor algorithm for efficient collection</p>
 
         <!-- Route Statistics -->
-        <div class="row mb-3" id="route-stats">
+        <div class="row mb-3">
           <div class="col-md-3">
             <div class="stat-card">
               <div class="stat-label">Total Stops</div>
-              <div class="stat-value" id="stat-stops">-</div>
+              <div class="stat-value" id="stat-stops-test">-</div>
             </div>
           </div>
           <div class="col-md-3">
             <div class="stat-card">
               <div class="stat-label">Total Distance</div>
-              <div class="stat-value" id="stat-distance">-</div>
+              <div class="stat-value" id="stat-distance-test">-</div>
             </div>
           </div>
           <div class="col-md-3">
             <div class="stat-card">
               <div class="stat-label">Est. Time</div>
-              <div class="stat-value" id="stat-time">-</div>
+              <div class="stat-value" id="stat-time-test">-</div>
             </div>
           </div>
           <div class="col-md-3">
@@ -121,10 +121,8 @@
           </div>
         </div>
 
-        <!-- Map -->
-        <div id="route-map" style="height: 500px; border-radius: 8px; overflow: hidden;"></div>
+        <div id="route-map-test" style="height: 500px; border-radius: 8px;"></div>
 
-        <!-- Route Table -->
         <div class="mt-4 table-responsive">
           <table class="table table-sm table-striped table-dark align-middle">
             <thead>
@@ -137,7 +135,7 @@
                 <th>Travel Time (min)</th>
               </tr>
             </thead>
-            <tbody id="route-stops-body">
+            <tbody id="route-stops-body-test">
               <tr><td colspan="6" class="text-center">Loading...</td></tr>
             </tbody>
           </table>
@@ -146,13 +144,49 @@
     </div>
   </div>
 
-  <!-- ------------ TAB 3: PROTOTYPE ------------ -->
+  <!-- ------------ TAB 3: PROTOTYPE PREDICTIONS ------------ -->
   <div class="tab-pane fade" id="panel-proto-pred" role="tabpanel">
-    <div class="card">
+    <div class="card mb-3">
       <div class="card-body">
-        <h4 class="card-title">Prototype Predictions</h4>
-        <p class="text-secondary">Live sensor data predictions</p>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h4 class="card-title mb-0">Prototype Bin Predictions (Live)</h4>
+            <p class="text-secondary mb-0">Real-time data from Raspberry Pi sensors</p>
+          </div>
+          <button class="btn btn-success" onclick="showRouteModal()">
+            🗺️ Generate Prototype Route
+          </button>
+        </div>
 
+        <!-- Statistics Cards -->
+        <div class="row mb-3">
+          <div class="col-md-3">
+            <div class="stat-card">
+              <div class="stat-label">Total Bins</div>
+              <div class="stat-value" id="proto-total-bins">-</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="stat-card">
+              <div class="stat-label">Avg Fill Level</div>
+              <div class="stat-value" id="proto-avg-fill">-</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="stat-card">
+              <div class="stat-label">High Priority (≥80%)</div>
+              <div class="stat-value text-danger" id="proto-high-priority">-</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="stat-card">
+              <div class="stat-label">Last Update</div>
+              <div class="stat-value" id="proto-last-update" style="font-size: 1rem;">-</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Predictions Table -->
         <div class="table-responsive">
           <table class="table table-sm table-striped table-dark align-middle">
             <thead>
@@ -162,17 +196,111 @@
                 <th>Location</th>
                 <th>Fill %</th>
                 <th>Predicted Full At</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody id="proto-predictions-body">
-              <tr><td colspan="5" class="text-center">Loading...</td></tr>
+              <tr><td colspan="6" class="text-center">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Auto-refresh toggle -->
+        <div class="d-flex justify-content-between align-items-center mt-3">
+          <small class="text-secondary">
+            <span class="badge bg-info" id="refresh-indicator">●</span> 
+            Auto-refresh every 30 seconds
+          </small>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadPredictions('prototype', 'proto-predictions-body')">
+            🔄 Refresh Now
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prototype Route Map -->
+    <div class="card" id="proto-route-card" style="display: none;">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h4 class="card-title mb-0">Prototype Collection Route</h4>
+          <button class="btn btn-sm btn-outline-secondary" onclick="toggleAllBins('prototype')">
+            <span id="bins-toggle-text-proto">Show All Bins</span>
+          </button>
+        </div>
+
+        <!-- Route Statistics -->
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <div class="stat-card">
+              <div class="stat-label">Stops</div>
+              <div class="stat-value" id="stat-stops-proto">-</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="stat-card">
+              <div class="stat-label">Distance</div>
+              <div class="stat-value" id="stat-distance-proto">-</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="stat-card">
+              <div class="stat-label">Est. Time</div>
+              <div class="stat-value" id="stat-time-proto">-</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="route-map-proto" style="height: 400px; border-radius: 8px;"></div>
+
+        <div class="mt-3 table-responsive">
+          <table class="table table-sm table-striped table-dark align-middle">
+            <thead>
+              <tr>
+                <th>Stop</th>
+                <th>Label</th>
+                <th>Bin ID</th>
+                <th>Distance (km)</th>
+                <th>Travel Time (min)</th>
+              </tr>
+            </thead>
+            <tbody id="route-stops-body-proto">
             </tbody>
           </table>
         </div>
       </div>
     </div>
   </div>
+</div>
 
+<!-- Route Generation Modal -->
+<div class="modal fade" id="routeModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content bg-dark text-light">
+      <div class="modal-header">
+        <h5 class="modal-title">Generate Prototype Route</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Depot Latitude</label>
+          <input type="number" class="form-control" id="depot-lat" step="0.000001" value="55.6761">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Depot Longitude</label>
+          <input type="number" class="form-control" id="depot-lon" step="0.000001" value="12.5683">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Fill Threshold (%)</label>
+          <input type="number" class="form-control" id="threshold" min="0" max="100" value="70">
+          <small class="text-secondary">Only include bins above this fill level</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" onclick="generateProtoRoute()">Generate Route</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <style>
@@ -193,8 +321,22 @@
     font-weight: bold;
     color: #0d6efd;
   }
-  .leaflet-popup-content {
-    color: #000;
+  .form-control, .form-select {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #eee;
+  }
+  .form-control:focus {
+    background: #333;
+    border-color: #0d6efd;
+    color: #eee;
+  }
+  #refresh-indicator {
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 </style>
 
@@ -202,38 +344,40 @@
 
 {% block extra_scripts %}
 <script>
+  let maps = {};
+  let routeLayers = {};
+  let markers = {};
+  let allBinsLayers = {};
+  let showingAllBins = {};
+  let autoRefreshInterval;
 
   /* ======================================================
-     SHOW CORRECT UPLOAD BUTTON FOR SELECTED TAB
+     TAB MANAGEMENT
   ====================================================== */
   function updateUploadButtons(activeTab) {
     const btnPred = document.getElementById("btn-upload-predictions");
     const btnRoute = document.getElementById("btn-upload-route");
-
+    
     if (activeTab === "panel-test-pred") {
-        btnPred.style.display = "inline-block";
-        btnRoute.style.display = "none";
-    }
-    else if (activeTab === "panel-route") {
-        btnPred.style.display = "none";
-        btnRoute.style.display = "inline-block";
-    }
-    else {
-        btnPred.style.display = "none";
-        btnRoute.style.display = "none";
+      btnPred.style.display = "inline-block";
+      btnRoute.style.display = "none";
+    } else if (activeTab === "panel-route") {
+      btnPred.style.display = "none";
+      btnRoute.style.display = "inline-block";
+    } else {
+      btnPred.style.display = "none";
+      btnRoute.style.display = "none";
     }
   }
 
   document.addEventListener("DOMContentLoaded", () => {
     const tabs = document.querySelectorAll('button[data-bs-toggle="tab"]');
-
     tabs.forEach(btn => {
-        btn.addEventListener("shown.bs.tab", (event) => {
-            const target = event.target.getAttribute("data-bs-target").substring(1);
-            updateUploadButtons(target);
-        });
+      btn.addEventListener("shown.bs.tab", (event) => {
+        const target = event.target.getAttribute("data-bs-target").substring(1);
+        updateUploadButtons(target);
+      });
     });
-
     updateUploadButtons("panel-test-pred");
   });
 
@@ -242,27 +386,37 @@
   ====================================================== */
   async function loadPredictions(source, tbodyId) {
     const tbody = document.getElementById(tbodyId);
-    tbody.innerHTML = '<tr><td colspan="5" class="text-center">Loading...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center">Loading...</td></tr>';
 
     try {
       const res = await fetch('/api/predictions?source=' + source);
       const data = await res.json();
 
       if (!data.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-secondary">No predictions found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-secondary">No predictions found. Connect your Raspberry Pi to send data.</td></tr>';
+        
+        if (source === 'prototype') {
+          document.getElementById('proto-total-bins').textContent = '0';
+          document.getElementById('proto-avg-fill').textContent = '0%';
+          document.getElementById('proto-high-priority').textContent = '0';
+        }
         return;
       }
 
       tbody.innerHTML = '';
+      let totalFill = 0;
+      let highPriority = 0;
+
       data.forEach((row, idx) => {
         const tr = document.createElement('tr');
+        const location = (row.lat && row.lon) ? `${row.lat.toFixed(4)}, ${row.lon.toFixed(4)}` : (row.location_name || '-');
+        const fillClass = row.predicted_fill_percent >= 80 ? 'text-danger' : row.predicted_fill_percent >= 60 ? 'text-warning' : 'text-success';
+        const statusBadge = row.predicted_fill_percent >= 80 ? '<span class="badge bg-danger">URGENT</span>' : 
+                           row.predicted_fill_percent >= 60 ? '<span class="badge bg-warning">MEDIUM</span>' : 
+                           '<span class="badge bg-success">LOW</span>';
 
-        const location = (row.lat && row.lon)
-            ? `${row.lat.toFixed(4)}, ${row.lon.toFixed(4)}`
-            : (row.location_name || '-');
-
-        const fillClass = row.predicted_fill_percent >= 80 ? 'text-danger' : 
-                         row.predicted_fill_percent >= 60 ? 'text-warning' : '';
+        totalFill += row.predicted_fill_percent || 0;
+        if (row.predicted_fill_percent >= 80) highPriority++;
 
         tr.innerHTML = `
           <td>${idx + 1}</td>
@@ -270,32 +424,91 @@
           <td><small>${location}</small></td>
           <td class="${fillClass}"><strong>${row.predicted_fill_percent != null ? row.predicted_fill_percent.toFixed(1) + '%' : '-'}</strong></td>
           <td><small>${row.predicted_full_at || '-'}</small></td>
+          <td>${statusBadge}</td>
         `;
         tbody.appendChild(tr);
       });
 
+      // Update stats for prototype
+      if (source === 'prototype') {
+        document.getElementById('proto-total-bins').textContent = data.length;
+        document.getElementById('proto-avg-fill').textContent = (totalFill / data.length).toFixed(1) + '%';
+        document.getElementById('proto-high-priority').textContent = highPriority;
+        document.getElementById('proto-last-update').textContent = new Date().toLocaleTimeString();
+      }
+
     } catch (err) {
       console.error(err);
-      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Error loading data</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error loading data</td></tr>';
     }
   }
 
   /* ======================================================
-     ROUTE MAP + TABLE
+     MAP FUNCTIONS
   ====================================================== */
-  let map;
-  let routeLayer;
-  let markers = [];
-
-  function initMap() {
-    map = L.map('route-map').setView([55.6761, 12.5683], 12);
+  function initMap(mapId, source) {
+    if (maps[source]) return;
+    
+    maps[source] = L.map(mapId).setView([55.6761, 12.5683], 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap'
-    }).addTo(map);
+      attribution: '© OpenStreetMap',
+      maxZoom: 18
+    }).addTo(maps[source]);
+    
+    allBinsLayers[source] = L.layerGroup().addTo(maps[source]);
+    markers[source] = [];
   }
 
-  async function loadRoute(source) {
-    const tbody = document.getElementById('route-stops-body');
+  async function showAllBins(source) {
+    try {
+      const res = await fetch('/api/predictions?source=' + source);
+      const data = await res.json();
+      
+      allBinsLayers[source].clearLayers();
+      
+      data.forEach((bin) => {
+        if (bin.lat && bin.lon) {
+          const fillPct = bin.predicted_fill_percent || 0;
+          const color = fillPct >= 80 ? '#dc3545' : fillPct >= 60 ? '#ffc107' : '#6c757d';
+          
+          const marker = L.circleMarker([bin.lat, bin.lon], {
+            radius: 6,
+            fillColor: color,
+            color: '#fff',
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 0.8
+          }).addTo(allBinsLayers[source]);
+          
+          marker.bindPopup(`
+            <div style="min-width: 150px; color: #333;">
+              <h6 style="margin: 0 0 8px 0;">🗑️ ${bin.bin_id}</h6>
+              <strong>Fill:</strong> <span style="color: ${color}">${fillPct.toFixed(1)}%</span><br>
+              <strong>Location:</strong> ${bin.location_name || 'Unknown'}
+            </div>
+          `);
+        }
+      });
+    } catch (err) {
+      console.error('Error loading bins:', err);
+    }
+  }
+
+  function toggleAllBins(source) {
+    showingAllBins[source] = !showingAllBins[source];
+    const toggleText = document.getElementById('bins-toggle-text-' + source);
+    
+    if (showingAllBins[source]) {
+      showAllBins(source);
+      toggleText.textContent = 'Hide All Bins';
+    } else {
+      allBinsLayers[source].clearLayers();
+      toggleText.textContent = 'Show All Bins';
+    }
+  }
+
+  async function loadRoute(source, mapId, tbodyId, statsPrefix) {
+    const tbody = document.getElementById(tbodyId);
     tbody.innerHTML = '<tr><td colspan="6" class="text-center">Loading...</td></tr>';
 
     try {
@@ -303,75 +516,65 @@
       const data = await res.json();
 
       if (!data.stops || !data.stops.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-secondary">No route data. Generate one using "Optimize Route" button.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center text-secondary">No route. Click "Generate ${source === 'test' ? 'Test' : 'Prototype'} Route"</td></tr>`;
         return;
       }
 
       tbody.innerHTML = '';
-
-      // Clear existing markers and routes
-      if (routeLayer) routeLayer.remove();
-      markers.forEach(m => m.remove());
-      markers = [];
+      if (routeLayers[source]) routeLayers[source].remove();
+      markers[source].forEach(m => m.remove());
+      markers[source] = [];
 
       const latlngs = [];
-      let totalDist = 0;
-      let totalTime = 0;
+      let totalDist = 0, totalTime = 0;
 
       data.stops.forEach((s, idx) => {
         const tr = document.createElement('tr');
-
         totalDist += s.distance_from_prev_km || 0;
         totalTime += s.est_travel_time_min || 0;
-
-        // Highlight depot stops
         const rowClass = (s.label && s.label.includes('Depot')) ? 'table-info' : '';
 
         tr.innerHTML = `
           <td class="${rowClass}"><strong>${idx + 1}</strong></td>
           <td class="${rowClass}">${s.label || '-'}</td>
           <td class="${rowClass}"><code>${s.bin_id || '-'}</code></td>
-          <td class="${rowClass}"><small>${s.lat ? s.lat.toFixed(4) : '-'}, ${s.lon ? s.lon.toFixed(4) : '-'}</small></td>
           <td class="${rowClass}">${s.distance_from_prev_km != null ? s.distance_from_prev_km.toFixed(2) : '-'}</td>
           <td class="${rowClass}">${s.est_travel_time_min != null ? s.est_travel_time_min.toFixed(1) : '-'}</td>
         `;
         tbody.appendChild(tr);
 
-        // Add markers
         if (s.lat && s.lon) {
           const ll = [s.lat, s.lon];
           latlngs.push(ll);
           
           const isDepot = s.label && s.label.includes('Depot');
-          const iconColor = isDepot ? 'green' : 'blue';
+          const iconColor = isDepot ? '#28a745' : '#0d6efd';
           
           const marker = L.marker(ll, {
             icon: L.divIcon({
               className: 'custom-marker',
-              html: `<div style="background: ${iconColor}; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 2px solid white;">${idx + 1}</div>`,
-              iconSize: [30, 30]
+              html: `<div style="background: ${iconColor}; color: white; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.4);">${idx + 1}</div>`,
+              iconSize: [36, 36]
             })
-          }).addTo(map);
+          }).addTo(maps[source]);
           
-          marker.bindPopup(`<strong>${s.label}</strong><br>Bin: ${s.bin_id || 'N/A'}<br>Stop ${idx + 1}`);
-          markers.push(marker);
+          marker.bindPopup(`<strong>${s.label}</strong><br>Stop ${idx + 1}`);
+          markers[source].push(marker);
         }
       });
 
-      // Draw route line
       if (latlngs.length > 1) {
-        routeLayer = L.polyline(latlngs, { 
+        routeLayers[source] = L.polyline(latlngs, { 
           color: '#0d6efd', 
-          weight: 3,
-          opacity: 0.7 
-        }).addTo(map);
-        map.fitBounds(routeLayer.getBounds().pad(0.1));
+          weight: 4,
+          opacity: 0.8
+        }).addTo(maps[source]);
+        maps[source].fitBounds(routeLayers[source].getBounds().pad(0.1));
       }
 
-      // Update statistics
-      document.getElementById('stat-stops').textContent = data.stops.length - 2; // Exclude depot
-      document.getElementById('stat-distance').textContent = totalDist.toFixed(2) + ' km';
-      document.getElementById('stat-time').textContent = (totalTime / 60).toFixed(1) + ' hours';
+      document.getElementById(`stat-stops-${statsPrefix}`).textContent = data.stops.length - 2;
+      document.getElementById(`stat-distance-${statsPrefix}`).textContent = totalDist.toFixed(2) + ' km';
+      document.getElementById(`stat-time-${statsPrefix}`).textContent = (totalTime / 60).toFixed(1) + ' hrs';
 
     } catch (err) {
       console.error(err);
@@ -379,17 +582,71 @@
     }
   }
 
-  function refreshRoute() {
-    loadRoute('test');
+  function refreshRoute(source) {
+    const mapId = source === 'test' ? 'route-map-test' : 'route-map-proto';
+    const tbodyId = source === 'test' ? 'route-stops-body-test' : 'route-stops-body-proto';
+    const statsPrefix = source === 'test' ? 'test' : 'proto';
+    loadRoute(source, mapId, tbodyId, statsPrefix);
   }
 
-  // Initialize on page load
+  /* ======================================================
+     PROTOTYPE ROUTE GENERATION
+  ====================================================== */
+  function showRouteModal() {
+    const modal = new bootstrap.Modal(document.getElementById('routeModal'));
+    modal.show();
+  }
+
+  async function generateProtoRoute() {
+    const depotLat = parseFloat(document.getElementById('depot-lat').value);
+    const depotLon = parseFloat(document.getElementById('depot-lon').value);
+    const threshold = parseFloat(document.getElementById('threshold').value);
+
+    try {
+      const res = await fetch('/dev/generate_prototype_route', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({depot_lat: depotLat, depot_lon: depotLon, threshold: threshold})
+      });
+
+      const data = await res.json();
+      
+      if (data.success) {
+        bootstrap.Modal.getInstance(document.getElementById('routeModal')).hide();
+        document.getElementById('proto-route-card').style.display = 'block';
+        
+        if (!maps['prototype']) {
+          initMap('route-map-proto', 'prototype');
+        }
+        
+        loadRoute('prototype', 'route-map-proto', 'route-stops-body-proto', 'proto');
+        alert(`✅ Route generated! ${data.stats.total_stops} stops, ${data.stats.total_distance_km} km`);
+      } else {
+        alert('❌ Error: ' + data.error);
+      }
+    } catch (err) {
+      alert('❌ Error generating route: ' + err);
+    }
+  }
+
+  /* ======================================================
+     AUTO-REFRESH FOR PROTOTYPE
+  ====================================================== */
+  function startAutoRefresh() {
+    autoRefreshInterval = setInterval(() => {
+      loadPredictions('prototype', 'proto-predictions-body');
+    }, 30000); // 30 seconds
+  }
+
+  /* ======================================================
+     INITIALIZATION
+  ====================================================== */
   document.addEventListener('DOMContentLoaded', () => {
-    initMap();
+    initMap('route-map-test', 'test');
     loadPredictions('test', 'test-predictions-body');
     loadPredictions('prototype', 'proto-predictions-body');
-    loadRoute('test');
+    loadRoute('test', 'route-map-test', 'route-stops-body-test', 'test');
+    startAutoRefresh();
   });
-
 </script>
 {% endblock %}
