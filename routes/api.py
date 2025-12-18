@@ -5,7 +5,90 @@ from extensions import db
 
 api_bp = Blueprint("api", __name__)
 
-@@ -90,3 +92,109 @@ def api_route():
+
+# ---------- Predictions API ----------
+
+@api_bp.route("/api/predictions")
+def api_predictions():
+    """
+    Return a list of predictions (test or prototype) ordered by
+    predicted full time then fill% desc.
+    """
+    source = request.args.get("source", "test")  # "test" or "prototype"
+
+    query = (
+        MLPrediction.query.join(Bin)
+        .filter(MLPrediction.source == source)
+        .order_by(
+            MLPrediction.predicted_full_at,
+            MLPrediction.predicted_fill_percent.desc(),
+        )
+    )
+
+    results = []
+    for p in query.all():
+        bin_obj = p.bin
+
+        results.append(
+            {
+                "bin_id": bin_obj.trash_can_id if bin_obj else None,
+                "location_name": bin_obj.location_name if bin_obj else None,
+                # expose latitude/longitude from DB as lat/lon in JSON
+                "lat": bin_obj.latitude if bin_obj else None,
+                "lon": bin_obj.longitude if bin_obj else None,
+                "predicted_fill_percent": p.predicted_fill_percent,
+                "predicted_full_at": (
+                    p.predicted_full_at.isoformat() if p.predicted_full_at else None
+                ),
+            }
+        )
+
+    return jsonify(results)
+
+
+# ---------- Route API ----------
+
+@api_bp.route("/api/route")
+def api_route():
+    """
+    Return the latest route for a given source ("test" or "prototype").
+    """
+    source = request.args.get("source", "test")
+
+    route = (
+        Route.query.filter_by(source=source)
+        .order_by(Route.created_at.desc())
+        .first()
+    )
+    if not route:
+        return jsonify({"route_id": None, "name": None, "source": source, "stops": []})
+
+    stops = (
+        RouteStop.query.filter_by(route_id=route.id)
+        .order_by(RouteStop.order_index)
+        .all()
+    )
+
+    stop_list = []
+    for s in stops:
+        bin_obj = s.bin
+        stop_list.append(
+            {
+                "order_index": s.order_index,
+                "label": s.label,
+                "bin_id": bin_obj.trash_can_id if bin_obj else None,
+                "lat": s.latitude,
+                "lon": s.longitude,
+                "distance_from_prev_km": s.distance_from_prev_km,
+                "est_travel_time_min": s.est_travel_time_min,
+            }
+        )
+
+    return jsonify(
+        {
+            "route_id": route.id,
+            "name": route.name,
+            "source": route.source,
             "stops": stop_list,
         }
     )
