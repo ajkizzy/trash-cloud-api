@@ -1,52 +1,255 @@
-import os
-from flask import Flask
+from flask import Blueprint, request, jsonify
+from datetime import datetime
+from models import Bin, MLPrediction, Route, RouteStop
 from extensions import db
+from ml_predictor import predictor  # Import our new predictor
+
+api_bp = Blueprint("api", __name__)
 
 
-def create_app() -> Flask:
-    app = Flask(__name__)
+# ---------- Predictions API ----------
 
-    # Database configuration from environment (Render)
-    database_url = os.environ.get("DATABASE_URL")
+@api_bp.route("/api/predictions")
+def api_predictions():
+    """
+    Return a list of predictions (test or prototype) ordered by
+    recorded time (created_at) descending - latest first.
+    """
+    source = request.args.get("source", "test")  # "test" or "prototype"
 
-    # Render often provides postgres:// but SQLAlchemy expects postgresql://
-    if database_url and database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
+    query = (
+        MLPrediction.query.join(Bin)
+        .filter(MLPrediction.source == source)
+        .order_by(MLPrediction.created_at.desc())  # Latest first
+    )
 
-    app.config["SQLALCHEMY_DATABASE_URI"] = database_url
-    app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    results = []
+    for p in query.all():
+        bin_obj = p.bin
 
-    # Initialize SQLAlchemy extension
-    db.init_app(app)
+        results.append(
+            {
+                "bin_id": bin_obj.trash_can_id if bin_obj else None,
+                "location_name": bin_obj.location_name if bin_obj else None,
+                # expose latitude/longitude from DB as lat/lon in JSON
+                "lat": bin_obj.latitude if bin_obj else None,
+                "lon": bin_obj.longitude if bin_obj else None,
+                "predicted_fill_percent": p.predicted_fill_percent,
+                "predicted_full_at": (
+                    p.predicted_full_at.isoformat() if p.predicted_full_at else None
+                ),
+                "recorded_at": (
+                    p.created_at.isoformat() if p.created_at else None
+                ),
+            }
+        )
 
-    with app.app_context():
-        # Import models so SQLAlchemy knows about them
-        from models import Bin, MLPrediction, Route, RouteStop  # noqa: F401
-
-        # Create tables if they do not exist yet (good enough for prototype)
-        db.create_all()
-
-        # Register blueprints
-        from routes.logs import logs_bp
-        from routes.api import api_bp
-        from routes.dashboard import dashboard_bp
-        from routes.upload import upload_bp
-        from routes.upload_route import upload_route_bp
-
-        app.register_blueprint(logs_bp)
-        app.register_blueprint(api_bp)
-        app.register_blueprint(dashboard_bp)
-        app.register_blueprint(upload_bp)
-        app.register_blueprint(upload_route_bp)
-
-    return app
-
-
-# Gunicorn on Render uses this object
-app = create_app()
+    return jsonify(results)
 
 
-if __name__ == "__main__":
-    # Local development entrypoint
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+# ---------- Route API ----------
+
+@api_bp.route("/api/route")
+def api_route():
+    """
+    Return the latest route for a given source ("test" or "prototype").
+    """
+    source = request.args.get("source", "test")
+
+    route = (
+        Route.query.filter_by(source=source)
+        .order_by(Route.created_at.desc())
+        .first()
+    )
+    if not route:
+        return jsonify({"route_id": None, "name": None, "source": source, "stops": []})
+
+    stops = (
+        RouteStop.query.filter_by(route_id=route.id)
+        .order_by(RouteStop.order_index)
+        .all()
+    )
+
+    stop_list = []
+    for s in stops:
+        bin_obj = s.bin
+        stop_list.append(
+            {
+                "order_index": s.order_index,
+                "label": s.label,
+                "bin_id": bin_obj.trash_can_id if bin_obj else None,
+                "lat": s.latitude,
+                "lon": s.longitude,
+                "distance_from_prev_km": s.distance_from_prev_km,
+                "est_travel_time_min": s.est_travel_time_min,
+            }
+        )
+
+    return jsonify(
+        {
+            "route_id": route.id,
+            "name": route.name,
+            "source": route.source,
+            "stops": stop_list,
+        }
+    )
+
+
+# ---------- Raspberry Pi Prototype Data Submission ----------
+
+@api_bp.route("/api/prototype/submit", methods=["POST"])
+def submit_prototype_data():
+    """
+    Receive prototype bin data from Raspberry Pi with SERVER-SIDE ML PREDICTION.
     
+    Expected JSON:
+    {
+        "bin_id": "BIN_RPI_001",
+        "fill_percent": 75.5,
+        "latitude": 55.6761,
+        "longitude": 12.5683,
+        "location_name": "Test Location",
+        "capacity_litres": 120
+    }
+    
+    The server automatically calculates predicted_full_at using ML.
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+        
+        # Required fields
+        bin_id = data.get("bin_id")
+        fill_percent = data.get("fill_percent")
+        
+        if not bin_id or fill_percent is None:
+            return jsonify({"error": "bin_id and fill_percent are required"}), 400
+        
+        # Validate fill_percent range
+        try:
+            fill_percent = float(fill_percent)
+            if fill_percent < 0 or fill_percent > 100:
+                return jsonify({"error": "fill_percent must be between 0 and 100"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "fill_percent must be a number"}), 400
+        
+        # Optional fields
+        latitude = data.get("latitude")
+        longitude = data.get("longitude")
+        location_name = data.get("location_name", "Prototype Location")
+        capacity_litres = data.get("capacity_litres", 120)
+        
+        # Get or create Bin
+        bin_obj = Bin.query.filter_by(trash_can_id=bin_id).first()
+        
+        if not bin_obj:
+            bin_obj = Bin(
+                trash_can_id=bin_id,
+                latitude=latitude,
+                longitude=longitude,
+                location_name=location_name,
+                capacity_litres=capacity_litres,
+                is_active=True
+            )
+            db.session.add(bin_obj)
+            db.session.flush()
+        else:
+            # Update location if provided
+            if latitude is not None:
+                bin_obj.latitude = latitude
+            if longitude is not None:
+                bin_obj.longitude = longitude
+            if location_name:
+                bin_obj.location_name = location_name
+        
+        # ✨ SERVER-SIDE ML PREDICTION ✨
+        # Calculate when bin will be full based on historical data
+        predicted_full_at = predictor.predict_full_time(bin_id, fill_percent)
+        
+        # Create ML Prediction with calculated prediction
+        prediction = MLPrediction(
+            bin=bin_obj,
+            source="prototype",
+            predicted_fill_percent=fill_percent,
+            predicted_full_at=predicted_full_at  # Now calculated by server!
+        )
+        db.session.add(prediction)
+        db.session.commit()
+        
+        return jsonify({
+            "success": True,
+            "message": f"Data received for bin {bin_id}",
+            "bin_id": bin_id,
+            "fill_percent": fill_percent,
+            "predicted_full_at": predicted_full_at.isoformat() if predicted_full_at else None,
+            "timestamp": datetime.utcnow().isoformat()
+        }), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+# ---------- NEW: Bin Statistics API ----------
+
+@api_bp.route("/api/bin/stats/<bin_id>")
+def bin_statistics(bin_id):
+    """
+    Get statistical information about a specific bin's fill patterns.
+    Useful for debugging and monitoring ML predictions.
+    """
+    try:
+        stats = predictor.get_bin_statistics(bin_id)
+        return jsonify({
+            "success": True,
+            "bin_id": bin_id,
+            "statistics": stats
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------- NEW: Prediction Confidence API ----------
+
+@api_bp.route("/api/prediction/confidence", methods=["POST"])
+def prediction_confidence():
+    """
+    Get prediction with confidence level.
+    
+    POST JSON:
+    {
+        "bin_id": "BIN_RPI_001",
+        "fill_percent": 75.5
+    }
+    """
+    try:
+        data = request.get_json()
+        bin_id = data.get("bin_id")
+        fill_percent = float(data.get("fill_percent", 0))
+        
+        predicted_time, confidence = predictor.predict_with_confidence(
+            bin_id, fill_percent
+        )
+        
+        return jsonify({
+            "success": True,
+            "bin_id": bin_id,
+            "current_fill": fill_percent,
+            "predicted_full_at": predicted_time.isoformat() if predicted_time else None,
+            "confidence": confidence
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------- Health Check ----------
+
+@api_bp.route("/api/health")
+def health_check():
+    """Simple health check endpoint."""
+    return jsonify({
+        "status": "ok",
+        "timestamp": datetime.utcnow().isoformat()
+    })
