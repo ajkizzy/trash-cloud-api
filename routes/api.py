@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from datetime import datetime
 from models import Bin, MLPrediction, Route, RouteStop
 from extensions import db
+from ml_predictor import predictor  # Import our new predictor
 
 api_bp = Blueprint("api", __name__)
 
@@ -99,7 +100,7 @@ def api_route():
 @api_bp.route("/api/prototype/submit", methods=["POST"])
 def submit_prototype_data():
     """
-    Receive prototype bin data from Raspberry Pi.
+    Receive prototype bin data from Raspberry Pi with SERVER-SIDE ML PREDICTION.
     
     Expected JSON:
     {
@@ -108,9 +109,10 @@ def submit_prototype_data():
         "latitude": 55.6761,
         "longitude": 12.5683,
         "location_name": "Test Location",
-        "capacity_litres": 120,
-        "predicted_full_at": "2025-12-20 14:30:00"  (optional)
+        "capacity_litres": 120
     }
+    
+    The server automatically calculates predicted_full_at using ML.
     """
     try:
         data = request.get_json()
@@ -125,23 +127,19 @@ def submit_prototype_data():
         if not bin_id or fill_percent is None:
             return jsonify({"error": "bin_id and fill_percent are required"}), 400
         
+        # Validate fill_percent range
+        try:
+            fill_percent = float(fill_percent)
+            if fill_percent < 0 or fill_percent > 100:
+                return jsonify({"error": "fill_percent must be between 0 and 100"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"error": "fill_percent must be a number"}), 400
+        
         # Optional fields
         latitude = data.get("latitude")
         longitude = data.get("longitude")
         location_name = data.get("location_name", "Prototype Location")
         capacity_litres = data.get("capacity_litres", 120)
-        predicted_full_str = data.get("predicted_full_at")
-        
-        # Parse predicted_full_at if provided
-        predicted_full_at = None
-        if predicted_full_str:
-            try:
-                predicted_full_at = datetime.fromisoformat(predicted_full_str)
-            except ValueError:
-                try:
-                    predicted_full_at = datetime.strptime(predicted_full_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    pass  # Leave as None if can't parse
         
         # Get or create Bin
         bin_obj = Bin.query.filter_by(trash_can_id=bin_id).first()
@@ -166,12 +164,16 @@ def submit_prototype_data():
             if location_name:
                 bin_obj.location_name = location_name
         
-        # Create ML Prediction
+        # ✨ SERVER-SIDE ML PREDICTION ✨
+        # Calculate when bin will be full based on historical data
+        predicted_full_at = predictor.predict_full_time(bin_id, fill_percent)
+        
+        # Create ML Prediction with calculated prediction
         prediction = MLPrediction(
             bin=bin_obj,
             source="prototype",
-            predicted_fill_percent=float(fill_percent),
-            predicted_full_at=predicted_full_at
+            predicted_fill_percent=fill_percent,
+            predicted_full_at=predicted_full_at  # Now calculated by server!
         )
         db.session.add(prediction)
         db.session.commit()
@@ -181,12 +183,65 @@ def submit_prototype_data():
             "message": f"Data received for bin {bin_id}",
             "bin_id": bin_id,
             "fill_percent": fill_percent,
+            "predicted_full_at": predicted_full_at.isoformat() if predicted_full_at else None,
             "timestamp": datetime.utcnow().isoformat()
         }), 201
         
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
+
+
+# ---------- NEW: Bin Statistics API ----------
+
+@api_bp.route("/api/bin/stats/<bin_id>")
+def bin_statistics(bin_id):
+    """
+    Get statistical information about a specific bin's fill patterns.
+    Useful for debugging and monitoring ML predictions.
+    """
+    try:
+        stats = predictor.get_bin_statistics(bin_id)
+        return jsonify({
+            "success": True,
+            "bin_id": bin_id,
+            "statistics": stats
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ---------- NEW: Prediction Confidence API ----------
+
+@api_bp.route("/api/prediction/confidence", methods=["POST"])
+def prediction_confidence():
+    """
+    Get prediction with confidence level.
+    
+    POST JSON:
+    {
+        "bin_id": "BIN_RPI_001",
+        "fill_percent": 75.5
+    }
+    """
+    try:
+        data = request.get_json()
+        bin_id = data.get("bin_id")
+        fill_percent = float(data.get("fill_percent", 0))
+        
+        predicted_time, confidence = predictor.predict_with_confidence(
+            bin_id, fill_percent
+        )
+        
+        return jsonify({
+            "success": True,
+            "bin_id": bin_id,
+            "current_fill": fill_percent,
+            "predicted_full_at": predicted_time.isoformat() if predicted_time else None,
+            "confidence": confidence
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ---------- Health Check ----------
