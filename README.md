@@ -2,6 +2,8 @@
 
 A Flask-based web application for optimizing waste collection routes using machine learning predictions and KNN-based route optimization.
 
+> Project status: student prototype for an IoT-enabled smart waste collection workflow.
+
 ## System Overview
 
 This system receives waste bin fill level predictions, stores them in a PostgreSQL database, and generates optimal collection routes using a K-Nearest Neighbor (KNN) algorithm. It supports both test datasets and real-time prototype data from IoT sensors.
